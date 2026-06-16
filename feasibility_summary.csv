@@ -1,0 +1,5 @@
+config,candidate_n,feasible_n
+POWERMOD-A,50,4
+POWERMOD-B,50,7
+POWERMOD-C,50,6
+POWERMOD-D,50,5
