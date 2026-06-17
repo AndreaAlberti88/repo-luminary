@@ -73,6 +73,15 @@ c2.metric("Simulation rows", f"{total_sim}")
 c3.metric("Test rows", f"{total_test}")
 c4.metric("Mean abs gap", f"{avg_abs_gap:.1f} °C")
 
+st.markdown(
+    """
+    ### Executive takeaway
+    - Config A is the anchor case; B/C/D remain under-validated.
+    - Simulation and chamber test show a systematic mismatch, so a simple global offset is not enough.
+    - The app reconciles simulation to test, makes uncertainty explicit, and ranks the next most informative tests within the observed chamber-test envelope.
+    """
+)
+
 st.write(
     "This demo compares simulation and chamber test data, "
     "calibrates the simulation bias, and ranks the next tests "
@@ -89,6 +98,11 @@ with tabs[0]:
 
     st.markdown("### Config-level summary")
     st.dataframe(comparison, use_container_width=True)
+
+    st.caption(
+        "Mean abs gap is a high-level summary of the absolute difference between simulation and test means per config. "
+        "Because B/C/D are sparse, interpret those rows cautiously."
+    )
 
     st.markdown("### Gap by config")
     show_image_if_exists(OUT / "06_gap.png", "Simulation vs test gap by config")
@@ -112,6 +126,11 @@ with tabs[0]:
 # ---------------------------------------------------------------------
 with tabs[1]:
     st.subheader("Reconciliation layer")
+
+    st.info(
+        "Sensor-key analysis uses `thermocouple_id + location_code` because `thermocouple_id` alone is not unique. "
+        "In particular, `TC_04` appears with two location codes (`CASE_TOP_CENTER` and `CASE_SIDE`), so it must not be treated as a single sensor."
+    )
 
     left, right = st.columns(2)
     with left:
@@ -175,6 +194,12 @@ with tabs[2]:
     st.write(
         "Recommendations are constrained to the operating envelope observed in the chamber tests, "
         "with only minor extrapolation."
+    )
+
+    st.info(
+        "How to read this: higher uncertainty, larger distance from already-tested operating points, "
+        "and higher corrected junction temperature increase priority. The ranking is intentionally biased "
+        "toward configs with sparse test coverage."
     )
 
     top_n = st.slider(
