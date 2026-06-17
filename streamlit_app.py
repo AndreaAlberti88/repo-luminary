@@ -5,7 +5,7 @@ import pandas as pd
 st.set_page_config(
     page_title="Luminary Thermal Demo",
     page_icon="🔥",
-    layout="wide"
+    layout="wide",
 )
 
 BASE = Path(__file__).resolve().parent
@@ -15,10 +15,13 @@ OUT = BASE / "outputs"
 st.title("Luminary Thermal Reconciliation Demo")
 st.caption("Simulation baseline + test reconciliation + next-best-test recommendations")
 
+# ---------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------
 @st.cache_data
 def load_csv(path: Path) -> pd.DataFrame:
     if not path.exists():
-        st.error(f"Missing file: {path}")
+        st.error(f"Missing file: {path.name}")
         st.stop()
     return pd.read_csv(path)
 
@@ -28,7 +31,15 @@ def show_image_if_exists(path: Path, caption: str = ""):
     else:
         st.info(f"Missing image: {path.name}")
 
+def fmt(x, digits=1):
+    try:
+        return f"{float(x):.{digits}f}"
+    except Exception:
+        return str(x)
+
+# ---------------------------------------------------------------------
 # Load data
+# ---------------------------------------------------------------------
 sim = load_csv(DATA / "sim_results.csv")
 test = load_csv(DATA / "thermal_chamber_test.csv")
 comparison = load_csv(OUT / "comparison_stats.csv")
@@ -39,59 +50,140 @@ sensor_key_residuals = load_csv(OUT / "sensor_key_residuals.csv")
 location_residuals = load_csv(OUT / "location_residuals.csv")
 feasibility = load_csv(OUT / "feasibility_summary.csv")
 
-configs = sorted(comparison["config"].tolist())
+# Optional outputs
+candidate_scores = OUT / "candidate_pool_scored.csv"
+if candidate_scores.exists():
+    candidate_scores_df = pd.read_csv(candidate_scores)
+else:
+    candidate_scores_df = None
 
-# Sidebar controls
-selected_cfg = st.sidebar.selectbox("Select config", configs)
-top_n = st.sidebar.slider("Top recommendations to show", 1, max(1, len(recommendations)), min(6, len(recommendations)))
+# ---------------------------------------------------------------------
+# High-level summary
+# ---------------------------------------------------------------------
+comparison = comparison.sort_values("config").reset_index(drop=True)
+avg_gap = comparison["gap"].mean()
+avg_abs_gap = comparison["gap"].abs().mean()
+total_sim = len(sim)
+total_test = len(test)
+n_configs = comparison["config"].nunique()
 
-# KPI row
-row = comparison[comparison["config"] == selected_cfg].iloc[0]
-c1, c2, c3 = st.columns(3)
-c1.metric("Sim mean", f"{row['sim_mean']:.1f} °C")
-c2.metric("Test mean", f"{row['test_mean']:.1f} °C")
-c3.metric("Gap", f"{row['gap']:.1f} °C")
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Configs", f"{n_configs}")
+c2.metric("Simulation rows", f"{total_sim}")
+c3.metric("Test rows", f"{total_test}")
+c4.metric("Mean abs gap", f"{avg_abs_gap:.1f} °C")
 
-tabs = st.tabs(["Overview", "Reconciliation", "Next best tests"])
+st.write(
+    "This demo compares simulation and chamber test data, "
+    "calibrates the simulation bias, and ranks the next tests "
+    "within the operating envelope observed in the chamber data."
+)
 
+tabs = st.tabs(["Overview", "Reconciliation", "Next best tests", "Data"])
+
+# ---------------------------------------------------------------------
+# OVERVIEW
+# ---------------------------------------------------------------------
 with tabs[0]:
     st.subheader("Overview")
-    st.write("Simulation points:", len(sim))
-    st.write("Test points:", len(test))
-    st.write("Matched operating points:", len(matched))
 
-    st.markdown("### Config-level comparison")
+    st.markdown("### Config-level summary")
     st.dataframe(comparison, use_container_width=True)
 
-    show_image_if_exists(OUT / "04_config_level.png", "Config-level sim vs test")
-    show_image_if_exists(OUT / "06_gap.png", "Simulation vs test gap")
+    st.markdown("### Gap by config")
+    show_image_if_exists(OUT / "06_gap.png", "Simulation vs test gap by config")
 
+    st.markdown("### Core comparison plots")
+    cols = st.columns(2)
+    with cols[0]:
+        show_image_if_exists(OUT / "04_config_level.png", "Config-level sim vs test")
+    with cols[1]:
+        show_image_if_exists(OUT / "05_power_vs_temp.png", "Power vs temperature")
+
+    st.markdown("### What this means")
+    st.write(
+        f"The average config gap is {avg_gap:.1f} °C and the mean absolute gap is {avg_abs_gap:.1f} °C. "
+        "The bias is not constant across configs, so a simple offset is not enough; "
+        "the reconciliation layer adds a physics-aware correction using power and ambient."
+    )
+
+# ---------------------------------------------------------------------
+# RECONCILIATION
+# ---------------------------------------------------------------------
 with tabs[1]:
     st.subheader("Reconciliation layer")
-    st.write("This section shows the bias correction layer and sensor diagnostics.")
 
-    st.markdown("### Config residuals")
-    st.dataframe(config_residuals, use_container_width=True)
+    left, right = st.columns(2)
+    with left:
+        st.markdown("### Config residuals")
+        st.dataframe(config_residuals, use_container_width=True)
 
-    st.markdown("### Sensor key residuals")
-    st.dataframe(sensor_key_residuals.head(10), use_container_width=True)
+    with right:
+        st.markdown("### Location residuals")
+        st.dataframe(location_residuals, use_container_width=True)
 
-    st.markdown("### Location residuals")
-    st.dataframe(location_residuals, use_container_width=True)
+    st.markdown("### Sensor-key residuals")
+    st.dataframe(sensor_key_residuals, use_container_width=True)
 
-    show_image_if_exists(OUT / "07_physics_aware_alignment.png", "Physics-aware operating-point alignment")
-    show_image_if_exists(OUT / "08_residual_vs_power.png", "Residual vs power")
-    show_image_if_exists(OUT / "09_mean_residual_by_config.png", "Mean residual by config")
-    show_image_if_exists(OUT / "10_mean_residual_by_sensor_key.png", "Mean residual by sensor key")
-    show_image_if_exists(OUT / "11_mean_residual_by_location_code.png", "Mean residual by location code")
-    show_image_if_exists(OUT / "14_before_after_error_hist.png", "Before vs after reconciliation")
-    show_image_if_exists(OUT / "16_interval_width_by_config.png", "Prediction interval width by config")
+    st.markdown("### Physics-aware operating-point alignment")
+    show_image_if_exists(OUT / "07_physics_aware_alignment.png", "Nearest sim point per test within same config")
 
+    cols = st.columns(2)
+    with cols[0]:
+        show_image_if_exists(OUT / "08_residual_vs_power.png", "Residual vs power")
+    with cols[1]:
+        show_image_if_exists(OUT / "09_mean_residual_by_config.png", "Mean residual by config")
+
+    cols = st.columns(2)
+    with cols[0]:
+        show_image_if_exists(OUT / "10_mean_residual_by_sensor_key.png", "Mean residual by sensor key")
+    with cols[1]:
+        show_image_if_exists(OUT / "11_mean_residual_by_location_code.png", "Mean residual by location code")
+
+    cols = st.columns(2)
+    with cols[0]:
+        show_image_if_exists(OUT / "14_before_after_error_hist.png", "Before vs after reconciliation")
+    with cols[1]:
+        show_image_if_exists(OUT / "16_interval_width_by_config.png", "Prediction interval width by config")
+
+    st.markdown("### A few matched operating points")
+    show_cols = [
+        "config",
+        "sensor_key",
+        "test_applied_power_W",
+        "matched_sim_power_W",
+        "test_ambient_temp_C",
+        "matched_sim_ambient_C",
+        "residual_C",
+    ]
+    st.dataframe(matched[show_cols].head(20), use_container_width=True)
+
+    st.markdown("### Reconciliation interpretation")
+    st.write(
+        "The matching is done within each config using proximity in power and ambient. "
+        "The residual captures the systematic gap between the matched simulation point "
+        "and the physical measurement. The sensor-key tables help show whether the error "
+        "is system-level or concentrated at specific measurement locations."
+    )
+
+# ---------------------------------------------------------------------
+# NEXT BEST TESTS
+# ---------------------------------------------------------------------
 with tabs[2]:
     st.subheader("Next best tests")
+
     st.write(
         "Recommendations are constrained to the operating envelope observed in the chamber tests, "
         "with only minor extrapolation."
+    )
+
+    top_n = st.slider(
+        "Top recommendations to show",
+        min_value=1,
+        max_value=max(1, len(recommendations)),
+        value=min(10, len(recommendations)),
+        step=1,
+        key="top_n_slider",
     )
 
     st.markdown("### Feasibility summary")
@@ -101,8 +193,47 @@ with tabs[2]:
     rec_view = recommendations.head(top_n).copy()
     st.dataframe(rec_view, use_container_width=True)
 
-    show_image_if_exists(OUT / "18_filtered_recommended_points_operating_space.png", "Filtered next-best-test recommendations")
-    show_image_if_exists(OUT / "19_next_best_test_ranking_filtered.png", "Ranking of top recommendations")
+    cols = st.columns(2)
+    with cols[0]:
+        show_image_if_exists(
+            OUT / "18_filtered_recommended_points_operating_space.png",
+            "Filtered next-best-test recommendations",
+        )
+    with cols[1]:
+        show_image_if_exists(
+            OUT / "19_next_best_test_ranking_filtered.png",
+            "Ranking of top recommendations",
+        )
+
+    st.markdown("### How to read the ranking")
+    st.write(
+        "Higher scores favor points with more uncertainty, more distance from already-tested conditions, "
+        "and higher corrected junction temperature. The recommendation set is intentionally biased "
+        "toward configs with sparse test coverage."
+    )
+
+    if candidate_scores_df is not None:
+        st.markdown("### Candidate pool summary")
+        st.dataframe(candidate_scores_df.head(20), use_container_width=True)
+
+# ---------------------------------------------------------------------
+# DATA
+# ---------------------------------------------------------------------
+with tabs[3]:
+    st.subheader("Data")
+
+    st.markdown("### Source datasets")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write("Simulation rows:", len(sim))
+        st.dataframe(sim.head(20), use_container_width=True)
+    with c2:
+        st.write("Test rows:", len(test))
+        st.dataframe(test.head(20), use_container_width=True)
+
+    st.markdown("### Output files available")
+    outputs_list = sorted([p.name for p in OUT.iterdir() if p.is_file()])
+    st.code("\n".join(outputs_list))
 
 st.divider()
 st.caption("Powered by Streamlit Community Cloud")
