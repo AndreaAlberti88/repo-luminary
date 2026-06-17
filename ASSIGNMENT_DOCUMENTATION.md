@@ -391,9 +391,6 @@ Louis confirmed that junction temperature is the primary KPI for phase 1, so the
 ### 4. Test-enveloped recommendations instead of unconstrained exploration
 The simulation sweep is intentionally broader than the test envelope. I therefore constrained the next-best-test ranking to the chamber-test operating envelope, with only minor extrapolation.
 
-### 5. No joblib model loading in Streamlit
-I avoided relying on a serialized scikit-learn pipeline inside Streamlit after environment/version incompatibility issues. The final demo is based on CSV outputs and precomputed artifacts, which is more robust for this take-home context.
-
 ---
 
 ## Limitations
